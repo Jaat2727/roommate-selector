@@ -1,25 +1,32 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { initialStudents, initialRooms } from './data';
+import { initialRooms } from './data';
+import { supabase } from './supabaseClient';
 import { FiEdit2, FiCheck, FiDownload, FiUsers, FiHome, FiMaximize2 } from 'react-icons/fi';
 
 export default function App() {
-  const [students, setStudents] = useState(() => {
-    const saved = localStorage.getItem('roommate-students');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        return initialStudents;
-      }
-    }
-    return initialStudents;
-  });
+  const [students, setStudents] = useState([]);
   const [rooms] = useState(initialRooms);
   
-  React.useEffect(() => {
-    localStorage.setItem('roommate-students', JSON.stringify(students));
-  }, [students]);
+  useEffect(() => {
+    fetchStudents();
+    
+    const channel = supabase
+      .channel('public:students')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, payload => {
+        fetchStudents();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    }
+  }, []);
+
+  const fetchStudents = async () => {
+    const { data } = await supabase.from('students').select('*').order('id');
+    if (data && data.length > 0) setStudents(data);
+  };
   
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
@@ -27,7 +34,7 @@ export default function App() {
 
   const unassignedStudents = students.filter(s => s.room === null);
 
-  const onDragEnd = (result) => {
+  const onDragEnd = async (result) => {
     const { source, destination, draggableId } = result;
 
     if (!destination) return;
@@ -39,25 +46,21 @@ export default function App() {
       return;
     }
 
-    if (destination.droppableId !== "unassigned") {
-      const roomStudents = students.filter(s => s.room === destination.droppableId);
+    const destRoom = destination.droppableId === "unassigned" ? null : destination.droppableId;
+
+    if (destRoom !== null) {
+      const roomStudents = students.filter(s => s.room === destRoom);
       if (roomStudents.length >= 2 && source.droppableId !== destination.droppableId) {
         alert("This room is full! Maximum capacity is 2.");
         return;
       }
     }
 
-    setStudents(prev => {
-      return prev.map(student => {
-        if (student.id === draggableId) {
-          return {
-            ...student,
-            room: destination.droppableId === "unassigned" ? null : destination.droppableId
-          };
-        }
-        return student;
-      });
-    });
+    setStudents(prev => prev.map(student => 
+      student.id === draggableId ? { ...student, room: destRoom } : student
+    ));
+
+    await supabase.from('students').update({ room: destRoom }).eq('id', draggableId);
   };
 
   const startEdit = (student) => {
@@ -66,9 +69,10 @@ export default function App() {
     setEditRoll(student.roll);
   };
 
-  const saveEdit = (id) => {
+  const saveEdit = async (id) => {
     setStudents(prev => prev.map(s => s.id === id ? { ...s, name: editName, roll: editRoll } : s));
     setEditingId(null);
+    await supabase.from('students').update({ name: editName, roll: editRoll }).eq('id', id);
   };
 
   const exportData = () => {
