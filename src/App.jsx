@@ -6,6 +6,7 @@ import { FiEdit2, FiCheck, FiDownload, FiUsers, FiHome, FiMaximize2, FiPlus, FiT
 export default function App() {
   const [students, setStudents] = useState([]);
   const [rooms, setRooms] = useState([]);
+  const [isModalOpen, setIsModalOpen] = useState(false);
   
   useEffect(() => {
     fetchStudents();
@@ -96,14 +97,6 @@ export default function App() {
     }
   };
 
-  const addStudent = async () => {
-    const newId = Date.now().toString();
-    const newStudent = { id: newId, name: 'New Student', roll: 'ROLL', room: null };
-    setStudents(prev => [...prev, newStudent]);
-    await supabase.from('students').insert(newStudent);
-    startEdit(newStudent);
-  };
-
   const startEditRoom = (room) => {
     setEditingRoomId(room.id);
     setEditRoomName(room.name);
@@ -127,6 +120,14 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[conic-gradient(at_top_right,_var(--tw-gradient-stops))] from-slate-100 via-blue-50 to-purple-100 p-3 md:p-6 font-sans">
+      {isModalOpen && (
+        <SpreadsheetModal 
+          students={students} 
+          setStudents={setStudents} 
+          onClose={() => setIsModalOpen(false)} 
+        />
+      )}
+
       <div className="max-w-[1600px] mx-auto">
         <header className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 bg-white/80 backdrop-blur-xl p-5 rounded-3xl shadow-sm border border-white">
           <div>
@@ -138,12 +139,20 @@ export default function App() {
               Drag and drop to assign rooms.
             </p>
           </div>
-          <button 
-            onClick={exportData}
-            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
-          >
-            <FiDownload className="text-lg" /> Export JSON
-          </button>
+          <div className="flex flex-col md:flex-row gap-3">
+            <button 
+              onClick={() => setIsModalOpen(true)}
+              className="flex items-center justify-center gap-2 bg-white text-slate-700 border border-slate-200 hover:border-slate-300 hover:bg-slate-50 px-5 py-2.5 rounded-xl font-bold text-sm transition-all shadow-sm"
+            >
+              <FiUsers className="text-lg text-blue-600" /> Manage Roster
+            </button>
+            <button 
+              onClick={exportData}
+              className="flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
+            >
+              <FiDownload className="text-lg" /> Export JSON
+            </button>
+          </div>
         </header>
 
         <DragDropContext onDragEnd={onDragEnd}>
@@ -163,13 +172,6 @@ export default function App() {
                     {unassignedStudents.length}
                   </span>
                 </h2>
-                <button 
-                  onClick={addStudent}
-                  className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg shadow-sm transition-colors"
-                  title="Add new student"
-                >
-                  <FiPlus />
-                </button>
               </div>
               
               <Droppable droppableId="unassigned">
@@ -336,6 +338,135 @@ export default function App() {
   );
 }
 
+function SpreadsheetModal({ students, onClose, setStudents }) {
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState("");
+  const [editRoll, setEditRoll] = useState("");
+
+  const startEdit = (student) => {
+    setEditingId(student.id);
+    setEditName(student.name);
+    setEditRoll(student.roll);
+  };
+
+  const saveEdit = async (id) => {
+    setStudents(prev => prev.map(s => s.id === id ? { ...s, name: editName, roll: editRoll } : s));
+    setEditingId(null);
+    await supabase.from('students').update({ name: editName, roll: editRoll }).eq('id', id);
+  };
+
+  const deleteStudent = async (id) => {
+    if (window.confirm("Are you sure you want to delete this student entirely from the roster?")) {
+      setStudents(prev => prev.filter(s => s.id !== id));
+      await supabase.from('students').delete().eq('id', id);
+    }
+  };
+
+  const addStudent = async () => {
+    const newId = Date.now().toString();
+    const newStudent = { id: newId, name: 'New Student', roll: 'ROLL', room: null };
+    setStudents(prev => [...prev, newStudent]);
+    await supabase.from('students').insert(newStudent);
+    startEdit(newStudent);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <div className="bg-white rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden border border-white/20">
+        <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 backdrop-blur-md">
+          <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+            <div className="p-2 bg-blue-100 text-blue-600 rounded-lg"><FiUsers size={18} /></div>
+            Manage Roster
+          </h2>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-800 hover:bg-slate-200 rounded-full transition-colors">
+            <FiX size={24} />
+          </button>
+        </div>
+        
+        <div className="flex-1 overflow-y-auto p-0 scrollbar-hide bg-white">
+          <table className="w-full text-left border-collapse">
+            <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
+              <tr>
+                <th className="p-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">S.No</th>
+                <th className="p-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">Full Name</th>
+                <th className="p-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">Roll Number</th>
+                <th className="p-4 font-bold text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200 text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {students.map((student, idx) => (
+                <tr key={student.id} className="hover:bg-slate-50/80 transition-colors group">
+                  <td className="p-4 text-slate-500 text-sm font-medium">{idx + 1}</td>
+                  <td className="p-4">
+                    {editingId === student.id ? (
+                      <input 
+                        type="text" 
+                        value={editName}
+                        onChange={e => setEditName(e.target.value)}
+                        className="w-full border-2 border-indigo-200 rounded-lg px-3 py-1.5 text-sm font-bold focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                        autoFocus
+                        onKeyDown={e => { if(e.key === 'Enter') saveEdit(student.id) }}
+                      />
+                    ) : (
+                      <span className="font-bold text-slate-800">{student.name}</span>
+                    )}
+                  </td>
+                  <td className="p-4">
+                    {editingId === student.id ? (
+                      <input 
+                        type="text" 
+                        value={editRoll}
+                        onChange={e => setEditRoll(e.target.value)}
+                        className="w-full border-2 border-slate-200 rounded-lg px-3 py-1.5 text-sm font-bold text-slate-600 focus:outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all"
+                        onKeyDown={e => { if(e.key === 'Enter') saveEdit(student.id) }}
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200">{student.roll}</span>
+                    )}
+                  </td>
+                  <td className="p-4 text-right flex justify-end gap-2 items-center h-full">
+                    {editingId === student.id ? (
+                      <button onClick={() => saveEdit(student.id)} className="bg-green-500 text-white px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 hover:bg-green-600 hover:-translate-y-0.5 transition-all shadow-sm">
+                        <FiCheck size={14}/> Save
+                      </button>
+                    ) : (
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                        <button onClick={() => startEdit(student)} className="text-slate-400 hover:text-indigo-600 p-2 rounded-lg hover:bg-indigo-50 transition-colors">
+                          <FiEdit2 size={16} />
+                        </button>
+                        <button onClick={() => deleteStudent(student.id)} className="text-slate-400 hover:text-rose-600 p-2 rounded-lg hover:bg-rose-50 transition-colors">
+                          <FiTrash2 size={16} />
+                        </button>
+                      </div>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {students.length === 0 && (
+                <tr>
+                  <td colSpan="4" className="p-8 text-center text-slate-400 font-medium">
+                    No students found. Add one below!
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+        
+        <div className="p-5 border-t border-slate-100 bg-slate-50/80 backdrop-blur-md flex justify-between items-center rounded-b-3xl">
+          <p className="text-sm font-bold text-slate-500">Total count: {students.length}</p>
+          <button 
+            onClick={addStudent}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-md transition-all hover:shadow-lg hover:-translate-y-0.5 active:translate-y-0"
+          >
+            <FiPlus size={16} /> Add Row
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function StudentCard({ student, editingId, editName, editRoll, setEditName, setEditRoll, startEdit, saveEdit, deleteStudent }) {
   if (editingId === student.id) {
     return (
@@ -386,13 +517,6 @@ function StudentCard({ student, editingId, editName, editRoll, setEditName, setE
           title="Edit student"
         >
           <FiEdit2 size={14} />
-        </button>
-        <button 
-          onClick={() => deleteStudent(student.id)}
-          className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg transition-colors shrink-0"
-          title="Delete student"
-        >
-          <FiTrash2 size={14} />
         </button>
       </div>
     </div>
