@@ -4,8 +4,22 @@ import { initialStudents, initialRooms } from './data';
 import { FiEdit2, FiCheck, FiDownload, FiUsers, FiHome, FiMaximize2 } from 'react-icons/fi';
 
 export default function App() {
-  const [students, setStudents] = useState(initialStudents);
+  const [students, setStudents] = useState(() => {
+    const saved = localStorage.getItem('roommate-students');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return initialStudents;
+      }
+    }
+    return initialStudents;
+  });
   const [rooms] = useState(initialRooms);
+  
+  React.useEffect(() => {
+    localStorage.setItem('roommate-students', JSON.stringify(students));
+  }, [students]);
   
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
