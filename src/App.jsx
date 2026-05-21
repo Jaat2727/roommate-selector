@@ -1,20 +1,23 @@
 import React, { useState, useEffect } from 'react';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
-import { initialRooms } from './data';
 import { supabase } from './supabaseClient';
-import { FiEdit2, FiCheck, FiDownload, FiUsers, FiHome, FiMaximize2 } from 'react-icons/fi';
+import { FiEdit2, FiCheck, FiDownload, FiUsers, FiHome, FiMaximize2, FiPlus, FiTrash2, FiX } from 'react-icons/fi';
 
 export default function App() {
   const [students, setStudents] = useState([]);
-  const [rooms] = useState(initialRooms);
+  const [rooms, setRooms] = useState([]);
   
   useEffect(() => {
     fetchStudents();
+    fetchRooms();
     
     const channel = supabase
-      .channel('public:students')
+      .channel('public_changes')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, payload => {
         fetchStudents();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'rooms' }, payload => {
+        fetchRooms();
       })
       .subscribe();
 
@@ -25,12 +28,20 @@ export default function App() {
 
   const fetchStudents = async () => {
     const { data } = await supabase.from('students').select('*').order('id');
-    if (data && data.length > 0) setStudents(data);
+    if (data) setStudents(data);
+  };
+
+  const fetchRooms = async () => {
+    const { data } = await supabase.from('rooms').select('*').order('id');
+    if (data) setRooms(data);
   };
   
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState("");
   const [editRoll, setEditRoll] = useState("");
+
+  const [editingRoomId, setEditingRoomId] = useState(null);
+  const [editRoomName, setEditRoomName] = useState("");
 
   const unassignedStudents = students.filter(s => s.room === null);
 
@@ -50,8 +61,11 @@ export default function App() {
 
     if (destRoom !== null) {
       const roomStudents = students.filter(s => s.room === destRoom);
-      if (roomStudents.length >= 2 && source.droppableId !== destination.droppableId) {
-        alert("This room is full! Maximum capacity is 2.");
+      const targetRoom = rooms.find(r => r.id === destRoom);
+      const capacity = targetRoom ? targetRoom.capacity : 2;
+      
+      if (roomStudents.length >= capacity && source.droppableId !== destination.droppableId) {
+        alert(`This room is full! Maximum capacity is ${capacity}.`);
         return;
       }
     }
@@ -75,6 +89,32 @@ export default function App() {
     await supabase.from('students').update({ name: editName, roll: editRoll }).eq('id', id);
   };
 
+  const deleteStudent = async (id) => {
+    if (window.confirm("Are you sure you want to delete this student?")) {
+      setStudents(prev => prev.filter(s => s.id !== id));
+      await supabase.from('students').delete().eq('id', id);
+    }
+  };
+
+  const addStudent = async () => {
+    const newId = Date.now().toString();
+    const newStudent = { id: newId, name: 'New Student', roll: 'ROLL', room: null };
+    setStudents(prev => [...prev, newStudent]);
+    await supabase.from('students').insert(newStudent);
+    startEdit(newStudent);
+  };
+
+  const startEditRoom = (room) => {
+    setEditingRoomId(room.id);
+    setEditRoomName(room.name);
+  };
+
+  const saveEditRoom = async (id) => {
+    setRooms(prev => prev.map(r => r.id === id ? { ...r, name: editRoomName } : r));
+    setEditingRoomId(null);
+    await supabase.from('rooms').update({ name: editRoomName }).eq('id', id);
+  };
+
   const exportData = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(students, null, 2));
     const downloadAnchorNode = document.createElement('a');
@@ -95,7 +135,7 @@ export default function App() {
             </h1>
             <p className="text-slate-600 mt-1 font-medium text-sm md:text-base flex items-center gap-2">
               <FiMaximize2 className="text-blue-500" />
-              Drag and drop to assign rooms. Max 2 students per room.
+              Drag and drop to assign rooms.
             </p>
           </div>
           <button 
@@ -109,20 +149,27 @@ export default function App() {
         <DragDropContext onDragEnd={onDragEnd}>
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            {/* Unassigned Column - 25% width on large screens */}
+            {/* Unassigned Column */}
             <div className="lg:col-span-4 xl:col-span-3 bg-white/70 backdrop-blur-2xl rounded-3xl shadow-sm border border-white/80 flex flex-col h-[calc(100vh-180px)] overflow-hidden">
-              <div className="p-4 bg-gradient-to-b from-white/90 to-white/40 border-b border-slate-200/60 shrink-0">
-                <h2 className="text-lg font-extrabold text-slate-800 flex items-center justify-between">
+              <div className="p-4 bg-gradient-to-b from-white/90 to-white/40 border-b border-slate-200/60 shrink-0 flex justify-between items-center">
+                <h2 className="text-lg font-extrabold text-slate-800 flex items-center justify-between flex-1">
                   <span className="flex items-center gap-2">
                     <div className="p-2 bg-blue-100 text-blue-600 rounded-lg">
                       <FiUsers size={18} />
                     </div>
-                    Unassigned
+                    Student List
                   </span>
-                  <span className="bg-white shadow-sm border border-slate-200 text-slate-700 px-3 py-1 rounded-full text-sm">
+                  <span className="bg-white shadow-sm border border-slate-200 text-slate-700 px-3 py-1 rounded-full text-sm mr-2">
                     {unassignedStudents.length}
                   </span>
                 </h2>
+                <button 
+                  onClick={addStudent}
+                  className="bg-blue-600 hover:bg-blue-700 text-white p-2 rounded-lg shadow-sm transition-colors"
+                  title="Add new student"
+                >
+                  <FiPlus />
+                </button>
               </div>
               
               <Droppable droppableId="unassigned">
@@ -156,6 +203,7 @@ export default function App() {
                               setEditRoll={setEditRoll}
                               startEdit={startEdit}
                               saveEdit={saveEdit}
+                              deleteStudent={deleteStudent}
                             />
                           </div>
                         )}
@@ -173,7 +221,7 @@ export default function App() {
               </Droppable>
             </div>
 
-            {/* Rooms Grid - 75% width on large screens */}
+            {/* Rooms Grid */}
             <div className="lg:col-span-8 xl:col-span-9 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 md:gap-5 overflow-y-auto h-[calc(100vh-180px)] pr-2 pb-6 scrollbar-hide content-start">
               {rooms.map(room => {
                 const roomStudents = students.filter(s => s.room === room.id);
@@ -186,17 +234,43 @@ export default function App() {
                       isFull ? 'bg-rose-50/90 border-rose-100' : 'bg-gradient-to-b from-white/90 to-white/40 border-slate-100'
                     }`}>
                       {isFull && <div className="absolute top-0 left-0 w-full h-1 bg-rose-500"></div>}
-                      <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
-                        <div className={`p-1.5 rounded-lg ${isFull ? 'bg-rose-200 text-rose-700' : 'bg-indigo-100 text-indigo-700'}`}>
-                          <FiHome size={16} />
+                      
+                      {editingRoomId === room.id ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <input 
+                            type="text" 
+                            value={editRoomName}
+                            onChange={e => setEditRoomName(e.target.value)}
+                            className="w-full text-lg font-extrabold bg-white border border-indigo-200 rounded px-2 py-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            autoFocus
+                            onKeyDown={e => { if(e.key === 'Enter') saveEditRoom(room.id) }}
+                          />
+                          <button onClick={() => saveEditRoom(room.id)} className="p-2 bg-green-500 text-white rounded hover:bg-green-600">
+                            <FiCheck />
+                          </button>
                         </div>
-                        {room.name}
-                      </h3>
-                      <div className={`flex items-center justify-center px-3 py-1 rounded-lg font-bold text-xs md:text-sm ${
-                        isFull ? 'bg-rose-500 text-white shadow-sm' : 'bg-white text-slate-600 shadow-sm border border-slate-200'
-                      }`}>
-                        {roomStudents.length}/{room.capacity}
-                      </div>
+                      ) : (
+                        <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2 flex-1">
+                          <div className={`p-1.5 rounded-lg ${isFull ? 'bg-rose-200 text-rose-700' : 'bg-indigo-100 text-indigo-700'}`}>
+                            <FiHome size={16} />
+                          </div>
+                          {room.name}
+                          <button 
+                            onClick={() => startEditRoom(room)}
+                            className="text-slate-400 hover:text-indigo-600 ml-1 p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <FiEdit2 size={14} />
+                          </button>
+                        </h3>
+                      )}
+                      
+                      {!editingRoomId && (
+                        <div className={`flex items-center justify-center px-3 py-1 rounded-lg font-bold text-xs md:text-sm ${
+                          isFull ? 'bg-rose-500 text-white shadow-sm' : 'bg-white text-slate-600 shadow-sm border border-slate-200'
+                        }`}>
+                          {roomStudents.length}/{room.capacity}
+                        </div>
+                      )}
                     </div>
                     
                     {/* Droppable Area */}
@@ -231,6 +305,7 @@ export default function App() {
                                     setEditRoll={setEditRoll}
                                     startEdit={startEdit}
                                     saveEdit={saveEdit}
+                                    deleteStudent={deleteStudent}
                                   />
                                 </div>
                               )}
@@ -261,7 +336,7 @@ export default function App() {
   );
 }
 
-function StudentCard({ student, editingId, editName, editRoll, setEditName, setEditRoll, startEdit, saveEdit }) {
+function StudentCard({ student, editingId, editName, editRoll, setEditName, setEditRoll, startEdit, saveEdit, deleteStudent }) {
   if (editingId === student.id) {
     return (
       <div className="flex flex-col gap-2">
@@ -284,31 +359,42 @@ function StudentCard({ student, editingId, editName, editRoll, setEditName, setE
             placeholder="Roll No"
           />
         </div>
-        <button 
-          onClick={() => saveEdit(student.id)}
-          className="mt-1 bg-green-500 hover:bg-green-600 text-white py-1.5 rounded-lg flex justify-center items-center gap-1.5 font-bold text-xs transition-all shadow-sm"
-        >
-          <FiCheck size={14} /> Save
-        </button>
+        <div className="flex gap-2 mt-1">
+          <button 
+            onClick={() => saveEdit(student.id)}
+            className="flex-1 bg-green-500 hover:bg-green-600 text-white py-1.5 rounded-lg flex justify-center items-center gap-1.5 font-bold text-xs transition-all shadow-sm"
+          >
+            <FiCheck size={14} /> Save
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div className="flex justify-between items-start gap-2">
-      <div className="min-w-0"> {/* min-w-0 ensures text truncation works if needed */}
+      <div className="min-w-0"> 
         <h4 className="font-bold text-slate-800 text-sm md:text-base leading-tight break-words">{student.name}</h4>
         <p className="text-[11px] md:text-xs text-slate-500 mt-1.5 font-bold bg-slate-100/80 border border-slate-200 inline-block px-2 py-0.5 rounded-md tracking-wide">
           {student.roll}
         </p>
       </div>
-      <button 
-        onClick={() => startEdit(student)}
-        className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all shrink-0"
-        title="Edit student"
-      >
-        <FiEdit2 size={16} />
-      </button>
+      <div className="flex flex-col gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <button 
+          onClick={() => startEdit(student)}
+          className="text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 p-1.5 rounded-lg transition-colors shrink-0"
+          title="Edit student"
+        >
+          <FiEdit2 size={14} />
+        </button>
+        <button 
+          onClick={() => deleteStudent(student.id)}
+          className="text-slate-400 hover:text-rose-600 hover:bg-rose-50 p-1.5 rounded-lg transition-colors shrink-0"
+          title="Delete student"
+        >
+          <FiTrash2 size={14} />
+        </button>
+      </div>
     </div>
   );
 }
